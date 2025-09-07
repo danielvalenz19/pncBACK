@@ -10,7 +10,9 @@ const swaggerUi = require('swagger-ui-express');
 const { authRouter } = require('./src/routes/auth');
 const { usersRouter } = require('./src/routes/users');
 const { adminRouter } = require('./src/routes/admin');
-const { authenticate } = require('./src/middlewares/auth');
+const { authenticate, requireRole } = require('./src/middlewares/auth');
+const { incidentsRouter } = require('./src/routes/incidents');
+const { devicesRouter } = require('./src/routes/devices');
 const { errorHandler } = require('./src/middlewares/errorHandler');
 
 const app = express();
@@ -36,6 +38,81 @@ const swaggerOptions = {
           type: 'http',
           scheme: 'bearer',
           bearerFormat: 'JWT'
+        }
+      },
+      schemas: {
+        IncidentCreate: {
+          type: 'object',
+          required: ['lat', 'lng', 'device'],
+            properties: {
+              lat: { type: 'number', minimum: -90, maximum: 90 },
+              lng: { type: 'number', minimum: -180, maximum: 180 },
+              accuracy: { type: 'number', minimum: 0 },
+              battery: { type: 'number', minimum: 0, maximum: 100 },
+              device: {
+                type: 'object',
+                required: ['os','version'],
+                properties: {
+                  os: { type: 'string', example: 'android' },
+                  version: { type: 'string', example: '14' }
+                }
+              }
+            }
+        },
+        IncidentCreated: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'INC-2025-000001' },
+            status: { type: 'string', example: 'NEW' }
+          }
+        },
+        LocationPing: {
+          type: 'object',
+          required: ['lat','lng'],
+          properties: {
+            lat: { type: 'number' },
+            lng: { type: 'number' },
+            accuracy: { type: 'number' },
+            ts: { type: 'number', description: 'Epoch seconds o ms' }
+          }
+        },
+        LocationAccepted: {
+          type: 'object',
+          properties: { accepted: { type: 'boolean', example: true } }
+        },
+        CancelIncidentRequest: {
+          type: 'object',
+          properties: { reason: { type: 'string', example: 'falsa alarma' } }
+        },
+        IncidentStatus: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            status: { type: 'string', example: 'NEW' },
+            started_at: { type: 'string', format: 'date-time' },
+            ended_at: { type: 'string', format: 'date-time', nullable: true },
+            last_location: {
+              type: 'object',
+              properties: {
+                at: { type: 'string', format: 'date-time' },
+                lat: { type: 'number' },
+                lng: { type: 'number' },
+                accuracy: { type: 'number', nullable: true }
+              }
+            }
+          }
+        },
+        DeviceRegister: {
+          type: 'object',
+          required: ['platform','fcm_token'],
+          properties: {
+            platform: { type: 'string', enum: ['android','ios'] },
+            fcm_token: { type: 'string', minLength: 10 }
+          }
+        },
+        DeviceRegistered: {
+          type: 'object',
+          properties: { device_id: { type: 'integer', example: 123 } }
         }
       }
     },
@@ -64,7 +141,10 @@ app.get('/api/v1/me', authenticate, (req, res) => {
 });
 app.use('/api/v1/users', authenticate, usersRouter);
 // Rutas de administración (protegidasy requieren rol admin internamente)
-app.use('/api/v1/admin', authenticate, adminRouter);
+app.use('/api/v1/admin', authenticate, requireRole('admin'), adminRouter);
+// App móvil (ciudadano) roles permitidos: unit, admin (admin para pruebas)
+app.use('/api/v1/incidents', authenticate, requireRole('unit','admin'), incidentsRouter);
+app.use('/api/v1/devices', authenticate, requireRole('unit','admin'), devicesRouter);
 
 /* 404 */
 app.use((_req, res) => res.status(404).json({ error: 'NotFound', message: 'Recurso no encontrado' }));
