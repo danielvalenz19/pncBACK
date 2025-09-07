@@ -54,7 +54,13 @@ app.use('/api/v1/auth', authRouter);
 
 /* Rutas protegidas */
 app.get('/api/v1/me', authenticate, (req, res) => {
-  res.json({ user_id: req.user.user_id, role: req.user.role, email: req.user.email || null });
+  // Token ya incluye must_change si aplica
+  res.json({
+    user_id: req.user.user_id,
+    role: req.user.role,
+    email: req.user.email || null,
+    must_change: !!req.user.must_change
+  });
 });
 app.use('/api/v1/users', authenticate, usersRouter);
 // Rutas de administración (protegidasy requieren rol admin internamente)

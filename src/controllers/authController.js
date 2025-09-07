@@ -2,12 +2,13 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const Joi = require('joi');
 
-const { findActiveByEmail, emailExists, createUser, updatePasswordById, findById } = require('../models/userModel');
+const { findActiveByEmail, emailExists, createUser, setPasswordAndClearForce, getAuthById, findById } = require('../models/userModel');
 const { createCitizen, getKbaDataByEmail } = require('../models/citizenModel');
 const { saveRefresh, getRefresh, revokeRefresh, revokeAllForUser } = require('../models/refreshModel');
 const { recordAttempt } = require('../models/passwordResetModel');
 const { signAccessToken, signRefreshToken, newJti, REFRESH_DAYS } = require('../utils/jwt');
 const { pool } = require('../config/db');
+const { validateStrength } = require('../utils/passwordPolicy');
 
 // -------------------- REGISTER (app ciudadanos) --------------------
 const registerSchema = Joi.object({
@@ -39,7 +40,7 @@ const registerSchema = Joi.object({
  *       201: { description: Created }
  */
 async function register(req, res, next) {
-  const trx = await pool.getConnection();
+  const conn = await pool.getConnection();
   try {
     const { value, error } = registerSchema.validate(req.body);
     if (error) return res.status(400).json({ error: 'BadRequest', message: error.message });
@@ -53,9 +54,9 @@ async function register(req, res, next) {
     let pinPlain = value.pin || (value.phone ? (value.phone.replace(/\D/g,'').slice(-4) || '0000') : '0000');
     const emergency_pin_hash = await bcrypt.hash(pinPlain, 12);
 
-    await trx.beginTransaction();
+  await conn.beginTransaction();
 
-    const userId = await createUser(trx, {
+  const userId = await createUser(conn, {
       email: value.email,
       phone: value.phone || null,
       password_hash,
@@ -63,15 +64,15 @@ async function register(req, res, next) {
       status: 'active'
     });
 
-    await createCitizen(trx, {
+  await createCitizen(conn, {
       user_id: userId,
       name: value.name,
       emergency_pin_hash
     });
 
-    await trx.commit();
+  await conn.commit();
 
-    const payload = { user_id: userId, role: 'unit', email: value.email };
+  const payload = { user_id: userId, role: 'unit', email: value.email, must_change: false };
     const accessToken = signAccessToken(payload);
     const jti = newJti();
     const refreshToken = signRefreshToken({ user_id: userId, role: 'unit' }, jti);
@@ -79,10 +80,10 @@ async function register(req, res, next) {
 
     res.status(201).json({ user_id: userId, accessToken, refreshToken });
   } catch (err) {
-    try { await pool.query('ROLLBACK'); } catch(_e){}
+    try { await conn.rollback(); } catch(_e){}
     next(err);
   } finally {
-    trx.release();
+    conn.release();
   }
 }
 
@@ -117,12 +118,12 @@ async function login(req, res, next) {
     const ok = await bcrypt.compare(value.password, user.password_hash);
     if (!ok) return res.status(401).json({ error: 'Unauthorized', message: 'Credenciales inválidas' });
 
-    const payload = { user_id: user.user_id, role: user.role, email: user.email };
+  const payload = { user_id: user.user_id, role: user.role, email: user.email, must_change: !!user.must_change_password };
     const accessToken = signAccessToken(payload);
     const jti = newJti();
     const refreshToken = signRefreshToken({ user_id: user.user_id, role: user.role }, jti);
     await saveRefresh({ jti, userId: user.user_id, ttlDays: REFRESH_DAYS, ip: req.ip, ua: req.headers['user-agent'] });
-    res.json({ accessToken, refreshToken, role: user.role });
+  res.json({ accessToken, refreshToken, role: user.role, must_change: !!user.must_change_password });
   } catch (err) { next(err); }
 }
 
@@ -226,7 +227,7 @@ async function recoveryVerify(req, res, next) {
   } catch (err) { next(err); }
 }
 
-const resetSchema = Joi.object({ kba_token: Joi.string().required(), new_password: Joi.string().min(8).required() });
+const resetSchema = Joi.object({ kba_token: Joi.string().required(), new_password: Joi.string().required() });
 /**
  * @swagger
  * /api/v1/auth/recovery/reset:
@@ -242,13 +243,46 @@ async function recoveryReset(req, res, next) {
     if (error) return res.status(400).json({ error: 'BadRequest', message: error.message });
     const payload = jwt.verify(value.kba_token, process.env.JWT_SECRET);
     if (!payload || payload.purpose !== 'pwd_reset') return res.status(401).json({ error: 'Unauthorized', message: 'Token inválido' });
-    const user = await findById(payload.user_id);
-    if (!user || user.status !== 'active') return res.status(401).json({ error: 'Unauthorized', message: 'Usuario inválido' });
+    const policy = validateStrength(value.new_password);
+    if (!policy.ok) {
+      return res.status(400).json({ error:'BadRequest', message:'La contraseña debe tener mínimo 8 caracteres, mayúscula, minúscula, dígito y símbolo' });
+    }
     const hash = await bcrypt.hash(value.new_password, 12);
-    await updatePasswordById(user.user_id, hash);
-    await revokeAllForUser(user.user_id);
+    await setPasswordAndClearForce(payload.user_id, hash);
+    await revokeAllForUser(payload.user_id);
+    res.status(204).end();
+  } catch (err) { next(err); }
+}
+// -------------------- CHANGE PASSWORD (nuevo, versión simple) --------------------
+const changePwdSchema = Joi.object({
+  current_password: Joi.string().required(),
+  new_password: Joi.string().min(8).required()
+});
+
+async function changePassword(req, res, next) {
+  try {
+    const { value, error } = changePwdSchema.validate(req.body);
+    if (error) return res.status(400).json({ error: 'BadRequest', message: error.message });
+
+    const userId = req.user?.user_id;
+    const userAuth = await getAuthById(userId);
+    if (!userAuth || userAuth.status !== 'active') {
+      return res.status(401).json({ error: 'Unauthorized', message: 'Usuario inválido' });
+    }
+
+    const ok = await bcrypt.compare(value.current_password, userAuth.password_hash);
+    if (!ok) return res.status(401).json({ error: 'Unauthorized', message: 'Credenciales inválidas' });
+
+    const policy = validateStrength(value.new_password);
+    if (!policy.ok) {
+      return res.status(400).json({ error:'BadRequest', message:'La contraseña debe tener mínimo 8 caracteres, mayúscula, minúscula, dígito y símbolo' });
+    }
+    const hash = await bcrypt.hash(value.new_password, 12);
+    await setPasswordAndClearForce(userId, hash);
+    await revokeAllForUser(userId);
+
     res.status(204).end();
   } catch (err) { next(err); }
 }
 
-module.exports = { register, login, refresh, logout, recoveryVerify, recoveryReset };
+module.exports = { register, login, refresh, logout, changePassword, recoveryVerify, recoveryReset };
