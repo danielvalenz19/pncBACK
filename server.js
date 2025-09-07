@@ -9,6 +9,7 @@ const swaggerUi = require('swagger-ui-express');
 
 const { authRouter } = require('./src/routes/auth');
 const { usersRouter } = require('./src/routes/users');
+const { adminRouter } = require('./src/routes/admin');
 const { authenticate } = require('./src/middlewares/auth');
 const { errorHandler } = require('./src/middlewares/errorHandler');
 
@@ -56,6 +57,8 @@ app.get('/api/v1/me', authenticate, (req, res) => {
   res.json({ user_id: req.user.user_id, role: req.user.role, email: req.user.email || null });
 });
 app.use('/api/v1/users', authenticate, usersRouter);
+// Rutas de administración (protegidasy requieren rol admin internamente)
+app.use('/api/v1/admin', authenticate, adminRouter);
 
 /* 404 */
 app.use((_req, res) => res.status(404).json({ error: 'NotFound', message: 'Recurso no encontrado' }));
