@@ -14,6 +14,7 @@ const { authenticate, requireRole } = require('./src/middlewares/auth');
 const { incidentsRouter } = require('./src/routes/incidents');
 const { devicesRouter } = require('./src/routes/devices');
 const { errorHandler } = require('./src/middlewares/errorHandler');
+const { opsRouter } = require('./src/routes/ops');
 
 const app = express();
 
@@ -113,6 +114,93 @@ const swaggerOptions = {
         DeviceRegistered: {
           type: 'object',
           properties: { device_id: { type: 'integer', example: 123 } }
+        },
+        OpsIncidentListItem: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'INC-2025-000010' },
+            created_at: { type: 'string', format: 'date-time' },
+            status: { type: 'string' },
+            lat: { type: 'number' },
+            lng: { type: 'number' },
+            accuracy: { type: 'number', nullable: true },
+            priority: { type: 'integer' },
+            battery: { type: 'integer', nullable: true }
+          }
+        },
+        OpsIncidentListResponse: {
+          type: 'object',
+          properties: {
+            items: { type: 'array', items: { $ref: '#/components/schemas/OpsIncidentListItem' } },
+            page: { type: 'integer' },
+            total: { type: 'integer' }
+          }
+        },
+        OpsIncidentDetail: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            citizen: { type: 'object', properties: { name: { type: 'string', nullable: true }, email: { type: 'string', nullable: true }, phone_last4: { type: 'string', nullable: true } } },
+            status: { type: 'string' },
+            started_at: { type: 'string', format: 'date-time' },
+            ended_at: { type: 'string', format: 'date-time', nullable: true },
+            locations: { type: 'array', items: { type: 'object', properties: { at: { type: 'string', format: 'date-time' }, lat: { type: 'number' }, lng: { type: 'number' }, accuracy: { type: 'number', nullable: true } } } },
+            assignments: { type: 'array', items: { type: 'object', properties: { id: { type: 'integer' }, unit_id: { type: 'integer' }, unit_name: { type: 'string' }, unit_type: { type: 'string' }, plate: { type: 'string', nullable: true }, assigned_at: { type: 'string', format: 'date-time', nullable: true } } } },
+            events: { type: 'array', items: { type: 'object', properties: { id: { type: 'integer' }, type: { type: 'string' }, at: { type: 'string', format: 'date-time' }, by: { type: 'integer', nullable: true }, notes: { type: 'string', nullable: true } } } }
+          }
+        },
+        OpsAssignRequest: {
+          type: 'object',
+          required: ['unit_id'],
+          properties: { unit_id: { type: 'integer' }, note: { type: 'string', nullable: true } }
+        },
+        OpsStatusRequest: {
+          type: 'object',
+          required: ['status'],
+          properties: { status: { type: 'string', enum: ['DISPATCHED','IN_PROGRESS','CLOSED'] }, reason: { type: 'string', nullable: true } }
+        },
+        OpsNoteRequest: {
+          type: 'object',
+          required: ['text'],
+          properties: { text: { type: 'string' } }
+        },
+        OpsNoteResponse: {
+          type: 'object',
+          properties: { id: { type: 'integer' }, at: { type: 'string', format: 'date-time' }, by: { type: 'integer' } }
+        },
+        Unit: {
+          type: 'object',
+          properties: { id: { type: 'integer' }, name: { type: 'string' }, type: { type: 'string' }, status: { type: 'string' }, active: { type: 'boolean' }, lat: { type: 'number', nullable: true }, lng: { type: 'number', nullable: true }, last_seen: { type: 'string', format: 'date-time', nullable: true } }
+        },
+        UnitCreateRequest: {
+          type: 'object',
+          required: ['name','type'],
+          properties: { name: { type: 'string' }, type: { type: 'string', enum: ['patrol','moto','ambulance'] }, plate: { type: 'string', nullable: true }, active: { type: 'boolean', default: true } }
+        },
+        UnitUpdateRequest: {
+          type: 'object',
+          properties: { name: { type: 'string' }, type: { type: 'string', enum: ['patrol','moto','ambulance'] }, plate: { type: 'string', nullable: true }, active: { type: 'boolean' }, status: { type: 'string', enum: ['available','en_route','on_site','out_of_service'] } }
+        },
+        OpsSettings: {
+          type: 'object',
+          properties: { countdown_seconds: { type: 'integer' }, ping_interval_seconds: { type: 'integer' }, data_retention_days: { type: 'integer' }, sla_ack_seconds: { type: 'integer' } }
+        },
+        OpsSettingsPatch: {
+          type: 'object',
+          properties: { countdown_seconds: { type: 'integer' }, ping_interval_seconds: { type: 'integer' }, data_retention_days: { type: 'integer' }, sla_ack_seconds: { type: 'integer' } }
+        },
+        AuditLogList: {
+          type: 'object',
+          properties: { items: { type: 'array', items: { type: 'object', properties: { id: { type: 'integer' }, who: { type: 'integer', nullable: true }, action: { type: 'string' }, entity: { type: 'string' }, entity_id: { type: 'string' }, at: { type: 'string', format: 'date-time' }, ip: { type: 'string', nullable: true } } } }, page: { type: 'integer' }, total: { type: 'integer' } }
+        },
+        Kpis: {
+          type: 'object',
+          properties: {
+            tta: { type: 'object', properties: { p50: { type: 'integer', nullable: true }, p90: { type: 'integer', nullable: true }, p95: { type: 'integer', nullable: true } } },
+            ttr: { type: 'object', properties: { p50: { type: 'integer', nullable: true }, p90: { type: 'integer', nullable: true }, p95: { type: 'integer', nullable: true } } },
+            sla_pct: { type: 'integer', nullable: true },
+            cancellations_pct: { type: 'integer', nullable: true }
+          }
         }
       }
     },
@@ -145,6 +233,8 @@ app.use('/api/v1/admin', authenticate, requireRole('admin'), adminRouter);
 // App móvil (ciudadano) roles permitidos: unit, admin (admin para pruebas)
 app.use('/api/v1/incidents', authenticate, requireRole('unit','admin'), incidentsRouter);
 app.use('/api/v1/devices', authenticate, requireRole('unit','admin'), devicesRouter);
+// Portal operación/despacho
+app.use('/api/v1/ops', authenticate, requireRole('operator','supervisor','admin'), opsRouter);
 
 /* 404 */
 app.use((_req, res) => res.status(404).json({ error: 'NotFound', message: 'Recurso no encontrado' }));
