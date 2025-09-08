@@ -15,6 +15,9 @@ const { incidentsRouter } = require('./src/routes/incidents');
 const { devicesRouter } = require('./src/routes/devices');
 const { errorHandler } = require('./src/middlewares/errorHandler');
 const { opsRouter } = require('./src/routes/ops');
+const { simulationsRouter } = require('./src/routes/simulations');
+const { initRealtime } = require('./src/realtime/io');
+const { realtimeRouter } = require('./src/routes/realtime');
 
 const app = express();
 
@@ -201,6 +204,99 @@ const swaggerOptions = {
             sla_pct: { type: 'integer', nullable: true },
             cancellations_pct: { type: 'integer', nullable: true }
           }
+        },
+        RealtimeIncidentNew: {
+          type: 'object',
+          description: 'Evento emitido a sala ops cuando se crea un incidente',
+          properties: {
+            id: { type: 'string', example: 'INC-2025-000045' },
+            lat: { type: 'number', example: 14.61 },
+            lng: { type: 'number', example: -90.53 },
+            created_at: { type: 'string', format: 'date-time' },
+            status: { type: 'string', example: 'NEW' }
+          },
+          required: ['id','lat','lng','created_at','status']
+        },
+        RealtimeIncidentPatch: {
+          type: 'object',
+          description: 'Patch parcial de un incidente. Solo aparecerán las secciones que cambian.',
+          properties: {
+            status: { type: 'string', example: 'ACK', description: 'Nuevo estado' },
+            location: {
+              type: 'object',
+              properties: {
+                lat: { type: 'number' },
+                lng: { type: 'number' },
+                accuracy: { type: 'number', nullable: true },
+                at: { type: 'string', format: 'date-time' }
+              }
+            },
+            assignment: {
+              type: 'object',
+              properties: {
+                unit_id: { type: 'integer' },
+                note: { type: 'string', nullable: true },
+                at: { type: 'string', format: 'date-time' }
+              }
+            },
+            event: {
+              type: 'object',
+              properties: {
+                type: { type: 'string', example: 'STATUS_REASON' },
+                reason: { type: 'string', nullable: true }
+              }
+            }
+          }
+        },
+        RealtimeIncidentsUpdate: {
+          type: 'object',
+          description: 'Evento emitido a sala ops para cambios en un incidente',
+          properties: {
+            id: { type: 'string', example: 'INC-2025-000045' },
+            patch: { $ref: '#/components/schemas/RealtimeIncidentPatch' }
+          },
+          required: ['id','patch']
+        },
+        RealtimeIncidentUpdateSingle: {
+          type: 'object',
+          description: 'Evento emitido a sala incident:<id> para cambios de ese incidente',
+          properties: {
+            id: { type: 'string' },
+            patch: { $ref: '#/components/schemas/RealtimeIncidentPatch' }
+          },
+          required: ['id','patch']
+        },
+        RealtimeUnitUpdate: {
+          type: 'object',
+            description: 'Estado/heartbeat de una unidad',
+            properties: {
+              id: { type: 'integer', example: 3 },
+              status: { type: 'string', example: 'available' },
+              lat: { type: 'number', nullable: true },
+              lng: { type: 'number', nullable: true },
+              last_seen: { type: 'string', format: 'date-time', nullable: true }
+            },
+            required: ['id','status']
+        },
+        RealtimeGeoUpdate: {
+          type: 'object',
+          description: 'Evento opcional de geocercas (si se implementa)',
+          properties: {
+            incident_id: { type: 'string' },
+            fence_id: { type: 'string' },
+            action: { type: 'string', example: 'ENTER' },
+            at: { type: 'string', format: 'date-time' }
+          },
+          required: ['incident_id','fence_id','action','at']
+        },
+        RealtimeSubscriptionAck: {
+          type: 'object',
+          description: 'Respuesta (ack) al intentar suscribirse a una sala',
+          properties: {
+            ok: { type: 'boolean' },
+            error: { type: 'string', nullable: true, example: 'forbidden' }
+          },
+          required: ['ok']
         }
       }
     },
@@ -235,6 +331,10 @@ app.use('/api/v1/incidents', authenticate, requireRole('unit','admin'), incident
 app.use('/api/v1/devices', authenticate, requireRole('unit','admin'), devicesRouter);
 // Portal operación/despacho
 app.use('/api/v1/ops', authenticate, requireRole('operator','supervisor','admin'), opsRouter);
+// Simulaciones (crear incidentes demo y cambiar estado) roles: operator, supervisor, admin
+app.use('/api/v1/simulations', authenticate, requireRole('operator','supervisor','admin'), simulationsRouter);
+// Info Realtime (solo documentación / listado de eventos)
+app.use('/api/v1/realtime', authenticate, realtimeRouter);
 
 /* 404 */
 app.use((_req, res) => res.status(404).json({ error: 'NotFound', message: 'Recurso no encontrado' }));
@@ -243,6 +343,9 @@ app.use((_req, res) => res.status(404).json({ error: 'NotFound', message: 'Recur
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 4000;
-http.createServer(app).listen(PORT, () => {
+const httpServer = http.createServer(app);
+// Inicializar Socket.IO realtime capa
+initRealtime(httpServer);
+httpServer.listen(PORT, () => {
   console.log(`🚀 API escuchando en http://localhost:${PORT}`);
 });

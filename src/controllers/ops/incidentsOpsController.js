@@ -1,5 +1,6 @@
 const Joi = require('joi');
 const model = require('../../models/opsModel');
+const { rt } = require('../../realtime/io');
 const { logAudit } = require('../../services/audit');
 
 const listSchema = Joi.object({
@@ -34,7 +35,8 @@ async function ack(req, res, next) {
     const result = await model.ackIncident({ id: req.params.id, by: req.user.user_id });
     if (!result.ok) return res.status(result.code).json({ error: 'Error', message: result.msg });
     await logAudit({ who: req.user.user_id, action: 'ACK', entity: 'incident', entityId: req.params.id, ip: req.ip });
-    res.json({ status: 'ACK' });
+  rt.incidentUpdate(req.params.id, { status: 'ACK' });
+  res.json({ status: 'ACK' });
   } catch (e) { next(e); }
 }
 
@@ -46,7 +48,9 @@ async function assign(req, res, next) {
     const r = await model.assignUnit({ id: req.params.id, unitId: value.unit_id, note: value.note, by: req.user.user_id });
     if (!r.ok) return res.status(r.code).json({ error: 'Error', message: r.msg });
     await logAudit({ who: req.user.user_id, action: 'ASSIGN', entity: 'incident', entityId: req.params.id, ip: req.ip, meta: { unit_id: value.unit_id }});
-    res.json({ status: 'DISPATCHED' });
+  rt.incidentUpdate(req.params.id, { assignment: { unit_id: value.unit_id, note: value.note || null, at: new Date().toISOString() } });
+  rt.incidentUpdate(req.params.id, { status: 'DISPATCHED' });
+  res.json({ status: 'DISPATCHED' });
   } catch (e) { next(e); }
 }
 
@@ -58,7 +62,10 @@ async function setStatus(req, res, next) {
     const r = await model.updateIncidentStatus({ id: req.params.id, status: value.status, reason: value.reason, by: req.user.user_id });
     if (!r.ok) return res.status(r.code).json({ error: 'Error', message: r.msg });
     await logAudit({ who: req.user.user_id, action: `STATUS_${value.status}`, entity: 'incident', entityId: req.params.id, ip: req.ip, meta: { reason: value.reason || null }});
-    res.json({ status: value.status });
+  const patch = { status: value.status };
+  if (value.reason) patch.event = { type: 'STATUS_REASON', reason: value.reason };
+  rt.incidentUpdate(req.params.id, patch);
+  res.json({ status: value.status });
   } catch (e) { next(e); }
 }
 

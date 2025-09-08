@@ -1,5 +1,6 @@
 const Joi = require('joi');
 const model = require('../../models/opsModel');
+const { rt } = require('../../realtime/io');
 const { logAudit } = require('../../services/audit');
 
 const listSchema = Joi.object({
@@ -27,9 +28,10 @@ async function create(req, res, next) {
   try {
     const { value, error } = createSchema.validate(req.body || {});
     if (error) return res.status(400).json({ error: 'BadRequest', message: error.message });
-    const id = await model.createUnit(value);
+  const id = await model.createUnit(value);
     await logAudit({ who: req.user.user_id, action: 'CREATE', entity: 'unit', entityId: id, ip: req.ip, meta: value });
-    res.status(201).json({ id });
+  rt.unitUpdate({ id, status: 'available', last_seen: new Date().toISOString() });
+  res.status(201).json({ id });
   } catch (e) { next(e); }
 }
 
@@ -48,7 +50,8 @@ async function update(req, res, next) {
     const ok = await model.updateUnit(Number(req.params.id), value);
     if (!ok) return res.status(404).json({ error: 'NotFound', message: 'Unidad no existe' });
     await logAudit({ who: req.user.user_id, action: 'UPDATE', entity: 'unit', entityId: req.params.id, ip: req.ip, meta: value });
-    res.status(204).end();
+  rt.unitUpdate({ id: Number(req.params.id), ...('status' in value ? { status: value.status } : {}), last_seen: new Date().toISOString() });
+  res.status(204).end();
   } catch (e) { next(e); }
 }
 

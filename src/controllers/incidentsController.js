@@ -1,4 +1,5 @@
 const Joi = require('joi');
+const { rt } = require('../realtime/io');
 const {
   createIncident,
   addLocation,
@@ -21,11 +22,9 @@ async function create(req, res, next) {
   try {
     const { value, error } = createSchema.validate(req.body);
     if (error) return res.status(400).json({ error: 'BadRequest', message: error.message });
-    const out = await createIncident({
-      userId: req.user.user_id,
-      ...value
-    });
-    res.status(201).json(out);
+  const out = await createIncident({ userId: req.user.user_id, ...value });
+  rt.incidentNew({ id: out.id, lat: value.lat, lng: value.lng, created_at: new Date().toISOString(), status: 'NEW' });
+  res.status(201).json(out);
   } catch (e) { next(e); }
 }
 
@@ -46,8 +45,9 @@ async function pushLocation(req, res, next) {
       userId: req.user.user_id,
       ...value
     });
-    if (!r.ok) return res.status(r.code).json({ error: 'Error', message: r.msg });
-    res.status(202).json({ accepted: true });
+  if (!r.ok) return res.status(r.code).json({ error: 'Error', message: r.msg });
+  rt.incidentUpdate(req.params.id, { location: { lat: value.lat, lng: value.lng, accuracy: value.accuracy ?? null, at: new Date().toISOString() } });
+  res.status(202).json({ accepted: true });
   } catch (e) { next(e); }
 }
 
@@ -63,8 +63,9 @@ async function cancel(req, res, next) {
       userId: req.user.user_id,
       reason: value.reason
     });
-    if (!r.ok) return res.status(r.code).json({ error: 'Error', message: r.msg });
-    res.json({ status: r.status });
+  if (!r.ok) return res.status(r.code).json({ error: 'Error', message: r.msg });
+  rt.incidentUpdate(req.params.id, { status: 'CANCELED' });
+  res.json({ status: r.status });
   } catch (e) { next(e); }
 }
 
