@@ -31,7 +31,7 @@ async function stats(req, res, next) {
     const WHERE = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
     const [[{ total_actions }]] = await pool.query(`SELECT COUNT(*) AS total_actions FROM audit_logs ${WHERE}`, params);
-    const [[{ unique_users }]] = await pool.query(`SELECT COUNT(DISTINCT who) AS unique_users FROM audit_logs ${WHERE}`, params);
+  const [[{ unique_users }]] = await pool.query(`SELECT COUNT(DISTINCT who_user_id) AS unique_users FROM audit_logs ${WHERE} ${WHERE ? 'AND' : 'WHERE'} who_user_id IS NOT NULL`, params);
     const [[{ security_events }]] = await pool.query(
       `SELECT COUNT(*) AS security_events FROM audit_logs ${WHERE} ${WHERE ? 'AND' : 'WHERE'} action IN ('LOGIN','LOGOUT','PASSWORD_RESET','LOGIN_FAILED')`, params
     );
@@ -58,7 +58,7 @@ async function topActivities(req, res, next) {
     );
 
     const [topUsers] = await pool.query(
-      `SELECT who AS user, COUNT(*) AS count FROM audit_logs ${WHERE} GROUP BY who ORDER BY count DESC LIMIT ?`, [...params, Number(limit)]
+      `SELECT who_user_id AS user, COUNT(*) AS count FROM audit_logs ${WHERE} ${WHERE ? 'AND' : 'WHERE'} who_user_id IS NOT NULL GROUP BY who_user_id ORDER BY count DESC LIMIT ?`, [...params, Number(limit)]
     );
 
     res.json({ top_actions: topActions, top_users: topUsers });

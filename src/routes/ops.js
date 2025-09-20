@@ -4,6 +4,7 @@ const units = require('../controllers/ops/unitsOpsController');
 const reports = require('../controllers/ops/reportsController');
 const audit = require('../controllers/ops/auditController');
 const settings = require('../controllers/ops/settingsController');
+const sims = require('../controllers/ops/simulationsController');
 
 const opsRouter = express.Router();
 
@@ -298,6 +299,11 @@ opsRouter.get('/reports/incidents-volume', reports.incidentsVolume);
 opsRouter.get('/audit', audit.list);
 opsRouter.get('/audit/stats', audit.stats);
 opsRouter.get('/audit/top-activities', audit.topActivities);
+// SIMULATIONS (Server-Sent Events + control)
+opsRouter.post('/simulations/start', sims.start);
+opsRouter.post('/simulations/stop', sims.stop);
+opsRouter.get('/simulations/status', sims.status);
+opsRouter.get('/simulations/events', sims.events);
 /**
  * @swagger
  * /api/v1/ops/settings:
