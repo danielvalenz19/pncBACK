@@ -296,6 +296,8 @@ opsRouter.get('/reports/incidents-volume', reports.incidentsVolume);
  *       200: { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuditLogList' } } } }
  */
 opsRouter.get('/audit', audit.list);
+opsRouter.get('/audit/stats', audit.stats);
+opsRouter.get('/audit/top-activities', audit.topActivities);
 /**
  * @swagger
  * /api/v1/ops/settings:
