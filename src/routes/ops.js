@@ -219,6 +219,74 @@ opsRouter.patch('/units/:id', units.update);
 opsRouter.get('/reports/kpis', reports.kpis);
 /**
  * @swagger
+ * /api/v1/ops/reports/response-times:
+ *   get:
+ *     summary: Response times trend
+ *     tags: [Ops]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: from
+ *         required: true
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: to
+ *         required: true
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: group_by
+ *         schema: { type: string, enum: [day,week,month], default: day }
+ *     responses:
+ *       200: { description: OK }
+ */
+opsRouter.get('/reports/response-times', reports.responseTimes);
+
+/**
+ * @swagger
+ * /api/v1/ops/reports/incidents-by-status:
+ *   get:
+ *     summary: Incidents by status
+ *     tags: [Ops]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: from
+ *         required: true
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: to
+ *         required: true
+ *         schema: { type: string, format: date-time }
+ *     responses:
+ *       200: { description: OK }
+ */
+opsRouter.get('/reports/incidents-by-status', reports.incidentsByStatus);
+
+/**
+ * @swagger
+ * /api/v1/ops/reports/incidents-volume:
+ *   get:
+ *     summary: Incidents created vs closed over time
+ *     tags: [Ops]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: from
+ *         required: true
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: to
+ *         required: true
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: group_by
+ *         schema: { type: string, enum: [day,week,month], default: day }
+ *     responses:
+ *       200: { description: OK }
+ */
+opsRouter.get('/reports/incidents-volume', reports.incidentsVolume);
+/**
+ * @swagger
  * /api/v1/ops/audit:
  *   get:
  *     summary: Listar auditoría

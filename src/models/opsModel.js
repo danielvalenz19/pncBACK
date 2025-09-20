@@ -38,4 +38,60 @@ async function updateUnit(id, data) { const fields=[]; const p=[]; for(const k o
 async function listAudit({ actor, action, from, to, page=1, limit=50 }) { const where=['1=1']; const p=[]; if(actor){ where.push('who_user_id=?'); p.push(actor); } if(action){ where.push('action=?'); p.push(action); } if(from){ where.push('at>=?'); p.push(new Date(from)); } if(to){ where.push('at<?'); p.push(new Date(to)); } const whereSQL=where.join(' AND '); const off=(page-1)*limit; const [[{ total }]] = await pool.query(`SELECT COUNT(*) AS total FROM audit_logs WHERE ${whereSQL}`,p); const [rows] = await pool.query(`SELECT id, who_user_id AS who, action, entity, entity_id, at, ip FROM audit_logs WHERE ${whereSQL} ORDER BY at DESC, id DESC LIMIT ? OFFSET ?`,[...p, Number(limit), Number(off)]); return { items: rows, page, total }; }
 function pctile(arr,p){ if(!arr.length) return null; const idx=(arr.length-1)*p; const lo=Math.floor(idx), hi=Math.ceil(idx); if(lo===hi) return arr[lo]; return arr[lo]+(arr[hi]-arr[lo])*(idx-lo); }
 async function getKpis(from,to){ const cfg=await settings.getAll(); const fromDt=new Date(from), toDt=new Date(to); const [ackRows] = await pool.query(`SELECT TIMESTAMPDIFF(SECOND, i.started_at, e.at) AS sec FROM incidents i JOIN incident_events e ON e.incident_id=i.id AND e.type='ACK' WHERE i.started_at >= ? AND i.started_at < ?`,[fromDt,toDt]); const [closeRows] = await pool.query(`SELECT TIMESTAMPDIFF(SECOND, i.started_at, i.ended_at) AS sec FROM incidents i WHERE i.status='CLOSED' AND i.started_at >= ? AND i.started_at < ? AND i.ended_at IS NOT NULL`,[fromDt,toDt]); const tta=ackRows.map(r=>Number(r.sec)).filter(n=>n>=0).sort((a,b)=>a-b); const ttr=closeRows.map(r=>Number(r.sec)).filter(n=>n>=0).sort((a,b)=>a-b); const tta_p50=pctile(tta,0.50), tta_p90=pctile(tta,0.90), tta_p95=pctile(tta,0.95); const ttr_p50=pctile(ttr,0.50), ttr_p90=pctile(ttr,0.90), ttr_p95=pctile(ttr,0.95); const slaThresh=Number(cfg.sla_ack_seconds ?? 60); const slaHits=tta.filter(s=>s<=slaThresh).length; const sla_pct=tta.length ? Math.round((slaHits/tta.length)*100) : null; const [[{ total }]] = await pool.query(`SELECT COUNT(*) AS total FROM incidents WHERE started_at>=? AND started_at<?`,[fromDt,toDt]); const [[{ canceled }]] = await pool.query(`SELECT COUNT(*) AS canceled FROM incidents WHERE status='CANCELED' AND started_at>=? AND started_at<?`,[fromDt,toDt]); const cancellations_pct=total ? Math.round((Number(canceled)/Number(total))*100) : null; return { ttr:{ p50:ttr_p50, p90:ttr_p90, p95:ttr_p95 }, tta:{ p50:tta_p50, p90:tta_p90, p95:tta_p95 }, sla_pct, cancellations_pct }; }
-module.exports = { listIncidents, getIncidentDetails, ackIncident, assignUnit, updateIncidentStatus, addNote, listUnits, createUnit, updateUnit, listAudit, getKpis };
+function bucketExpr(groupBy) {
+  switch (groupBy) {
+    case 'week': return "YEARWEEK(i.started_at, 3)";
+    case 'month': return "DATE_FORMAT(i.started_at,'%Y-%m')";
+    default: return "DATE(i.started_at)";
+  }
+}
+
+async function getResponseTimes(from, to, groupBy='day'){
+  const bucket = bucketExpr(groupBy);
+  const sql = `
+    SELECT ${bucket} AS bucket,
+           COUNT(*) AS incidents,
+           AVG(TIMESTAMPDIFF(SECOND, i.started_at, a.ack_at))       AS avg_tta_sec,
+           AVG(TIMESTAMPDIFF(SECOND, i.started_at, i.ended_at))     AS avg_duration_sec
+      FROM incidents i
+      LEFT JOIN (
+        SELECT incident_id, MIN(at) AS ack_at
+          FROM incident_events
+         WHERE type='ACK'
+         GROUP BY incident_id
+      ) a ON a.incident_id = i.id
+     WHERE i.started_at >= ? AND i.started_at < ?
+     GROUP BY bucket
+     ORDER BY bucket`;
+  const [rows] = await pool.query(sql, [new Date(from), new Date(to)]);
+  return rows;
+}
+
+async function getIncidentsByStatus(from, to){
+  const [rows] = await pool.query(
+    `SELECT i.status, COUNT(*) AS count
+       FROM incidents i
+      WHERE i.started_at >= ? AND i.started_at < ?
+      GROUP BY i.status
+      ORDER BY i.status`,
+    [new Date(from), new Date(to)]
+  );
+  return rows;
+}
+
+async function getIncidentsVolume(from, to, groupBy='day'){
+  const bucket = bucketExpr(groupBy);
+  const [rows] = await pool.query(
+    `SELECT ${bucket} AS bucket,
+            COUNT(*)                                   AS created,
+            SUM(i.status='CLOSED')                     AS closed
+       FROM incidents i
+      WHERE i.started_at >= ? AND i.started_at < ?
+      GROUP BY bucket
+      ORDER BY bucket`,
+    [new Date(from), new Date(to)]
+  );
+  return rows;
+}
+module.exports = { listIncidents, getIncidentDetails, ackIncident, assignUnit, updateIncidentStatus, addNote, listUnits, createUnit, updateUnit, listAudit, getKpis,
+  getResponseTimes, getIncidentsByStatus, getIncidentsVolume };
