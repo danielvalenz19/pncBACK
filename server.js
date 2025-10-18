@@ -173,7 +173,7 @@ const swaggerOptions = {
         },
         Unit: {
           type: 'object',
-          properties: { id: { type: 'integer' }, name: { type: 'string' }, type: { type: 'string' }, status: { type: 'string' }, active: { type: 'boolean' }, lat: { type: 'number', nullable: true }, lng: { type: 'number', nullable: true }, last_seen: { type: 'string', format: 'date-time', nullable: true } }
+          properties: { id: { type: 'integer' }, name: { type: 'string' }, type: { type: 'string' }, plate: { type: 'string', nullable: true }, status: { type: 'string' }, active: { type: 'boolean' }, lat: { type: 'number', nullable: true }, lng: { type: 'number', nullable: true }, last_seen: { type: 'string', format: 'date-time', nullable: true } }
         },
         UnitCreateRequest: {
           type: 'object',
