@@ -5,6 +5,7 @@ const reports = require('../controllers/ops/reportsController');
 const audit = require('../controllers/ops/auditController');
 const settings = require('../controllers/ops/settingsController');
 const sims = require('../controllers/ops/simulationsController');
+const citizensRouter = require('./ops.citizens');
 
 const opsRouter = express.Router();
 
@@ -146,6 +147,9 @@ opsRouter.patch('/incidents/:id/status', incidents.setStatus);
  *       200: { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OpsNoteResponse' } } } }
  */
 opsRouter.post('/incidents/:id/notes', incidents.addNote);
+
+// CIUDADANOS (portal ops)
+opsRouter.use('/citizens', citizensRouter);
 
 // UNIDADES
 /**
