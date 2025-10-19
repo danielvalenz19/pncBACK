@@ -1,4 +1,9 @@
 const model = require('../models/adminCitizensModel');
+const Joi = require('joi');
+const bcrypt = require('bcrypt');
+const { emailExists, createUser } = require('../models/userModel');
+const { createCitizen, getCitizenById } = require('../models/citizenModel');
+const { pool } = require('../config/db');
 
 exports.stats = async (req, res, next) => {
   try {
@@ -52,3 +57,56 @@ exports.updateStatus = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
+// Crear ciudadano (role='citizen')
+const createSchema = Joi.object({
+  name:     Joi.string().min(2).max(120).required(),
+  email:    Joi.string().email().required(),
+  phone:    Joi.string().allow('', null),
+  dpi:      Joi.string().allow('', null),
+  address:  Joi.string().allow('', null),
+  password: Joi.string().min(8).required(),
+  pin:      Joi.string().pattern(/^\d{4}$/).allow('', null)
+}).required();
+
+exports.create = async (req, res, next) => {
+  const conn = await pool.getConnection();
+  try {
+    const { value, error } = createSchema.validate(req.body || {});
+    if (error) return res.status(400).json({ error:'BadRequest', message:error.message });
+
+    if (await emailExists(value.email)) {
+      return res.status(409).json({ error:'Conflict', message:'Email ya registrado' });
+    }
+
+    const password_hash = await bcrypt.hash(value.password, 12);
+    const pinPlain = value.pin || (value.phone ? (value.phone.replace(/\D/g,'').slice(-4) || '0000') : '0000');
+    const emergency_pin_hash = await bcrypt.hash(pinPlain, 12);
+
+    await conn.beginTransaction();
+    const userId = await createUser(conn, {
+      email: value.email,
+      full_name: value.name,
+      phone: value.phone || null,
+      password_hash,
+      role: 'citizen',
+      status: 'active'
+    });
+
+    await createCitizen(conn, {
+      user_id: userId,
+      name: value.name,
+      dpi: value.dpi || null,
+      address: value.address || null,
+      emergency_pin_hash
+    });
+
+    await conn.commit();
+    const citizen = await getCitizenById(userId);
+    return res.status(201).json({ id: userId, ...citizen });
+  } catch (e) {
+    try { await conn.rollback(); } catch(_){ }
+    next(e);
+  } finally {
+    conn.release();
+  }
+};

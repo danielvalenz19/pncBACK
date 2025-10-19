@@ -8,10 +8,10 @@ const r = Router();
 r.use(authenticate, requireRole('admin','supervisor','operator','unit'));
 
 r.get('/stats',   ctrl.stats);           // KPIs + series
+r.post('/',       ctrl.create);          // crear ciudadano (role=citizen)
 r.get('/',        ctrl.list);            // listado paginado + filtros
 r.get('/:id',     ctrl.getOne);          // perfil + últimos incidentes
 r.patch('/:id',   ctrl.update);          // editar datos básicos
 r.patch('/:id/status', ctrl.updateStatus); // activar/bloquear
 
 module.exports = r;
-

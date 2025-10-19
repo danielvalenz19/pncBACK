@@ -18,6 +18,8 @@ const { opsRouter } = require('./src/routes/ops');
 const { simulationsRouter } = require('./src/routes/simulations');
 const { initRealtime } = require('./src/realtime/io');
 const { realtimeRouter } = require('./src/routes/realtime');
+const citizensAliasRouter = require('./src/routes/citizens');
+const { citizensRouter } = require('./src/routes/citizensRouter');
 
 const app = express();
 
@@ -312,6 +314,10 @@ app.get('/health', (_req, res) => res.json({ ok: true, env: process.env.NODE_ENV
 
 /* Auth */
 app.use('/api/v1/auth', authRouter);
+// Alias citizens routes (staff-only)
+app.use('/api/v1', citizensAliasRouter);
+// Dedicated citizens router mounted under /api/v1/citizens (staff-only)
+app.use('/api/v1/citizens', authenticate, requireRole('admin','supervisor','operator','unit'), citizensRouter);
 
 /* Rutas protegidas */
 app.get('/api/v1/me', authenticate, (req, res) => {
