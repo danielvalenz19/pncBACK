@@ -2,7 +2,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const Joi = require('joi');
 
-const { findActiveByEmail, emailExists, createUser, setPasswordAndClearForce, getAuthById, findById } = require('../models/userModel');
+const { findActiveByEmail, emailExists, createUser, setPasswordAndClearForce, getAuthById, findById, getProfileById } = require('../models/userModel');
 const { createCitizen, getKbaDataByEmail } = require('../models/citizenModel');
 const { saveRefresh, getRefresh, revokeRefresh, revokeAllForUser } = require('../models/refreshModel');
 const { recordAttempt } = require('../models/passwordResetModel');
@@ -285,4 +285,15 @@ async function changePassword(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { register, login, refresh, logout, changePassword, recoveryVerify, recoveryReset };
+// ---- Perfil del usuario autenticado ----
+async function me(req, res, next) {
+  try {
+    const uid = req.user?.user_id;
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+    const profile = await getProfileById(uid);
+    if (!profile) return res.status(404).json({ error: 'NotFound' });
+    return res.json(profile);
+  } catch (err) { next(err); }
+}
+
+module.exports = { register, login, refresh, logout, changePassword, recoveryVerify, recoveryReset, me };

@@ -68,6 +68,16 @@ async function findById(id) {
   return rows[0];
 }
 
+// NUEVO: perfil simplificado para /me
+async function getProfileById(id) {
+  const [rows] = await pool.execute(
+    `SELECT id AS user_id, email, full_name, phone, role, status, created_at
+       FROM users WHERE id=? LIMIT 1`,
+    [id]
+  );
+  return rows[0];
+}
+
 async function getAuthById(id) {
   const [rows] = await pool.execute(
     'SELECT id AS user_id, email, password_hash, status, must_change_password FROM users WHERE id=? LIMIT 1',
@@ -120,5 +130,6 @@ module.exports = {
   getAuthById,
   updateByIdPartial,
   emailExistsForOther,
-  getUsersStats
+  getUsersStats,
+  getProfileById
 };

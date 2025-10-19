@@ -1,5 +1,5 @@
 const express = require('express');
-const { login, refresh, logout, register, changePassword, recoveryVerify, recoveryReset } = require('../controllers/authController');
+const { login, refresh, logout, register, changePassword, recoveryVerify, recoveryReset, me } = require('../controllers/authController');
 const { authenticate } = require('../middlewares/auth');
 
 const authRouter = express.Router();
@@ -15,6 +15,9 @@ authRouter.post('/register', register); // app ciudadanos
 authRouter.post('/login', login);
 authRouter.post('/refresh', refresh);
 authRouter.post('/logout', logout);
+
+// perfil del usuario autenticado
+authRouter.get('/me', authenticate, me);
 
 // cambio de contraseña autenticado
 /**
