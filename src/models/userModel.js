@@ -76,6 +76,36 @@ async function getAuthById(id) {
   return rows[0];
 }
 
+async function emailExistsForOther(email, excludeId) {
+  const [rows] = await pool.execute('SELECT 1 FROM users WHERE email=? AND id<>? LIMIT 1', [email, excludeId]);
+  return rows.length > 0;
+}
+
+async function updateByIdPartial(id, { email, phone, role }) {
+  const sets = [];
+  const params = [];
+  if (email !== undefined) { sets.push('email=?'); params.push(email); }
+  if (phone !== undefined) { sets.push('phone=?'); params.push(phone || null); }
+  if (role !== undefined)  { sets.push('role=?');  params.push(role); }
+  if (!sets.length) return null;
+  const sql = `UPDATE users SET ${sets.join(', ')}, updated_at=NOW() WHERE id=?`;
+  params.push(id);
+  await pool.execute(sql, params);
+  return await findById(id);
+}
+
+async function getUsersStats() {
+  const [rows] = await pool.query(
+    `SELECT
+       COUNT(*)              AS total,
+       SUM(status="active")   AS active,
+       SUM(status="inactive") AS inactive,
+       SUM(role="operator")   AS operators
+     FROM users`
+  );
+  return rows[0] || { total: 0, active: 0, inactive: 0, operators: 0 };
+}
+
 module.exports = {
   findActiveByEmail,
   listUsers,
@@ -86,5 +116,8 @@ module.exports = {
   setPasswordAndClearForce,
   updateStatusById,
   findById,
-  getAuthById
+  getAuthById,
+  updateByIdPartial,
+  emailExistsForOther,
+  getUsersStats
 };

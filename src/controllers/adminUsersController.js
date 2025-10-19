@@ -1,6 +1,6 @@
 const Joi = require('joi');
 const bcrypt = require('bcrypt');
-const { emailExists, createUser, setTempPasswordAndForceChange, updateStatusById, findById } = require('../models/userModel');
+const { emailExists, createUser, setTempPasswordAndForceChange, updateStatusById, findById, updateByIdPartial, emailExistsForOther, listUsers, getUsersStats } = require('../models/userModel');
 const { revokeAllForUser } = require('../models/refreshModel');
 const { genPassword } = require('../utils/passwords');
 const { sendMail } = require('../services/mailer');
@@ -117,4 +117,82 @@ async function updateStatus(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { createStaff, resetPassword, updateStatus };
+async function getById(req, res, next) {
+  try {
+    const id = Number(req.params.id);
+    const user = await findById(id);
+    if (!user) return res.status(404).json({ error: 'NotFound', message: 'Usuario no existe' });
+    return res.json({ id: user.user_id, email: user.email, phone: user.phone, role: user.role, status: user.status });
+  } catch (err) { next(err); }
+}
+
+const updateSchema = Joi.object({
+  email: Joi.string().email().optional(),
+  phone: Joi.string().allow(null, '').optional(),
+  role:  Joi.string().valid('admin','operator','supervisor','unit').optional(),
+  // UI might send full_name; not stored currently
+  full_name: Joi.any().optional()
+}).min(1);
+
+async function update(req, res, next) {
+  try {
+    const id = Number(req.params.id);
+    const existing = await findById(id);
+    if (!existing) return res.status(404).json({ error: 'NotFound', message: 'Usuario no existe' });
+
+    const { value, error } = updateSchema.validate(req.body);
+    if (error) return res.status(400).json({ error: 'BadRequest', message: error.message });
+
+    if (value.email) {
+      const conflict = await emailExistsForOther(value.email, id);
+      if (conflict) return res.status(409).json({ error: 'Conflict', message: 'Email ya registrado' });
+    }
+
+    const updated = await updateByIdPartial(id, { email: value.email, phone: value.phone, role: value.role });
+    if (!updated) return res.status(400).json({ error: 'BadRequest', message: 'Nada para actualizar' });
+    return res.json({ id: updated.user_id, email: updated.email, phone: updated.phone, role: updated.role, status: updated.status });
+  } catch (err) { next(err); }
+}
+
+// exports consolidated at end
+// GET /api/v1/admin/users  (lista paginada + filtros)
+async function list(req, res, next) {
+  try {
+    const page  = Number(req.query.page)  || 1;
+    const limit = Number(req.query.limit) || 20;
+    const { q, role, status } = req.query;
+
+    const { total, rows } = await listUsers({ q, role, status, page, limit });
+
+    const items = rows.map(r => ({
+      id: r.user_id,
+      email: r.email,
+      phone: r.phone,
+      role: r.role,
+      status: r.status,
+      must_change: !!r.must_change_password,
+      created_at: r.created_at,
+      updated_at: r.updated_at
+    }));
+
+    res.json({ items, page, total });
+  } catch (err) { next(err); }
+}
+
+// GET /api/v1/admin/users/stats  (KPIs de la cabecera)
+async function stats(req, res, next) {
+  try {
+    const s = await getUsersStats();
+    res.json({
+      total: Number(s.total) || 0,
+      active: Number(s.active) || 0,
+      operators: Number(s.operators) || 0,
+      inactive: Number(s.inactive) || 0
+    });
+  } catch (err) { next(err); }
+}
+
+module.exports = {
+  createStaff, resetPassword, updateStatus, getById, update,
+  list, stats
+};

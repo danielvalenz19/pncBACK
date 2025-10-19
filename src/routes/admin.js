@@ -35,6 +35,27 @@ const adminRouter = express.Router();
  */
 adminRouter.post('/users', requireRole('admin'), ctrl.createStaff);
 
+// Listado y KPIs
+adminRouter.get('/users/stats', requireRole('admin'), ctrl.stats);
+adminRouter.get('/users', requireRole('admin'), ctrl.list);
+
+/**
+ * @swagger
+ * /api/v1/admin/users/{id}:
+ *   get:
+ *     summary: Get user by id (admin)
+ *     tags: [Admin]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: OK }
+ */
+adminRouter.get('/users/:id', requireRole('admin'), ctrl.getById);
+
 /**
  * @swagger
  * /api/v1/admin/users/{id}/reset-password:
@@ -78,5 +99,32 @@ adminRouter.post('/users/:id/reset-password', requireRole('admin'), ctrl.resetPa
  *       204: { description: No Content }
  */
 adminRouter.patch('/users/:id/status', requireRole('admin'), ctrl.updateStatus);
+
+/**
+ * @swagger
+ * /api/v1/admin/users/{id}:
+ *   patch:
+ *     summary: Update user fields (admin)
+ *     tags: [Admin]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email: { type: string }
+ *               phone: { type: string }
+ *               role:  { type: string, enum: [admin,operator,supervisor,unit] }
+ *     responses:
+ *       200: { description: OK }
+ */
+adminRouter.patch('/users/:id', requireRole('admin'), ctrl.update);
 
 module.exports = { adminRouter };
