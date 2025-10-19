@@ -23,6 +23,7 @@ async function createStaff(req, res, next) {
 
     const id = await createUser(null, {
       email: value.email,
+      full_name: value.name || null,
       phone: value.phone || null,
       password_hash: hash,
       role: value.role,
@@ -122,16 +123,15 @@ async function getById(req, res, next) {
     const id = Number(req.params.id);
     const user = await findById(id);
     if (!user) return res.status(404).json({ error: 'NotFound', message: 'Usuario no existe' });
-    return res.json({ id: user.user_id, email: user.email, phone: user.phone, role: user.role, status: user.status });
+    return res.json({ id: user.user_id, email: user.email, full_name: user.full_name || null, phone: user.phone, role: user.role, status: user.status });
   } catch (err) { next(err); }
 }
 
 const updateSchema = Joi.object({
   email: Joi.string().email().optional(),
+  full_name: Joi.string().allow(null, '').optional(),
   phone: Joi.string().allow(null, '').optional(),
-  role:  Joi.string().valid('admin','operator','supervisor','unit').optional(),
-  // UI might send full_name; not stored currently
-  full_name: Joi.any().optional()
+  role:  Joi.string().valid('admin','operator','supervisor','unit').optional()
 }).min(1);
 
 async function update(req, res, next) {
@@ -148,9 +148,9 @@ async function update(req, res, next) {
       if (conflict) return res.status(409).json({ error: 'Conflict', message: 'Email ya registrado' });
     }
 
-    const updated = await updateByIdPartial(id, { email: value.email, phone: value.phone, role: value.role });
+    const updated = await updateByIdPartial(id, { email: value.email, full_name: value.full_name, phone: value.phone, role: value.role });
     if (!updated) return res.status(400).json({ error: 'BadRequest', message: 'Nada para actualizar' });
-    return res.json({ id: updated.user_id, email: updated.email, phone: updated.phone, role: updated.role, status: updated.status });
+    return res.json({ id: updated.user_id, email: updated.email, full_name: updated.full_name || null, phone: updated.phone, role: updated.role, status: updated.status });
   } catch (err) { next(err); }
 }
 
@@ -167,6 +167,7 @@ async function list(req, res, next) {
     const items = rows.map(r => ({
       id: r.user_id,
       email: r.email,
+      full_name: r.full_name || null,
       phone: r.phone,
       role: r.role,
       status: r.status,
