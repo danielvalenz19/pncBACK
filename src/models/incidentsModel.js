@@ -194,10 +194,12 @@ async function ensureDemoCitizenId() {
       [email, pwd]
     );
     const userId = res.insertId;
+    const demoPin = process.env.SIM_DEMO_PIN || '0000';
+    const pinHash = await bcrypt.hash(demoPin, 10);
     await conn.execute(
-      `INSERT INTO citizens (user_id, name)
-       VALUES (?, ?)`,
-      [userId, 'Demo Simulation']
+      `INSERT INTO citizens (user_id, name, emergency_pin_hash)
+       VALUES (?, ?, ?)`,
+      [userId, 'Demo Simulation', pinHash]
     );
     await conn.commit();
     return userId;
@@ -229,19 +231,21 @@ async function createDemoIncident({ lat, lng, accuracy, battery, device }) {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
+    // Estado inicial válido: NEW (is_demo=1 indica simulación)
     await conn.execute(
       `INSERT INTO incidents
         (id, citizen_id, priority, status, lat, lng, accuracy, init_battery, device_os, device_ver, is_demo, started_at)
-       VALUES (?, ?, 3, 'SIMULATION', ?, ?, ?, ?, ?, ?, 1, NOW())`,
-      [incidentId, citizenId, lat, lng, accuracy || null, battery || null, device?.os || null, device?.version || null]
+       VALUES (?, ?, 3, 'NEW', ?, ?, ?, ?, ?, ?, 1, NOW())`,
+      [incidentId, citizenId, lat, lng, (accuracy ?? null), (battery ?? null), (device?.os ?? null), (device?.version ?? null)]
     );
+    // Registrar inicio de simulación como evento de estado
     await conn.execute(
-      `INSERT INTO incident_events (incident_id, type, at, by_user_id, payload_json, created_at)
-       VALUES (?, 'SIM_START', NOW(), NULL, JSON_OBJECT('lat', ?, 'lng', ?, 'accuracy', ?, 'battery', ?, 'device', JSON_OBJECT('os', ?, 'version', ?)), NOW())`,
-      [incidentId, lat, lng, accuracy || null, battery || null, device?.os || null, device?.version || null]
+      `INSERT INTO incident_events (incident_id, type, at, by_user_id, notes, payload_json, created_at)
+       VALUES (?, 'STATUS', NOW(), NULL, 'SIM_START', JSON_OBJECT('lat', ?, 'lng', ?, 'accuracy', ?, 'battery', ?, 'device', JSON_OBJECT('os', ?, 'version', ?)), NOW())`,
+      [incidentId, lat, lng, (accuracy ?? null), (battery ?? null), (device?.os ?? null), (device?.version ?? null)]
     );
     await conn.commit();
-    return { id: incidentId, status: 'SIMULATION' };
+    return { id: incidentId, status: 'NEW' };
   } catch (e) {
     try { await conn.rollback(); } catch(_){ }
     throw e;
@@ -259,21 +263,24 @@ async function updateSimulationStatus({ incidentId, status }) {
   if (!inc) return { ok: false, code: 404, msg: 'Simulación no encontrada' };
 
   if (status === 'PAUSED') {
-    if (inc.status !== 'SIMULATION') return { ok: false, code: 409, msg: 'No se puede pausar en el estado actual' };
-    await pool.execute(`UPDATE incidents SET status='SIM_PAUSED', updated_at=NOW() WHERE id=?`, [incidentId]);
-    await pool.execute(`INSERT INTO incident_events (incident_id, type, at, by_user_id, created_at) VALUES (?, 'SIM_PAUSE', NOW(), NULL, NOW())`, [incidentId]);
-    return { ok: true, status: 'SIM_PAUSED' };
+    await pool.execute(
+      `INSERT INTO incident_events (incident_id, type, at, by_user_id, notes, created_at)
+       VALUES (?, 'STATUS', NOW(), NULL, 'SIM_PAUSE', NOW())`, [incidentId]
+    );
+    return { ok: true, status: 'PAUSED' };
   }
   if (status === 'RUNNING') {
-    if (inc.status !== 'SIM_PAUSED') return { ok: false, code: 409, msg: 'Solo se puede reanudar una simulación pausada' };
-    await pool.execute(`UPDATE incidents SET status='SIMULATION', updated_at=NOW() WHERE id=?`, [incidentId]);
-    await pool.execute(`INSERT INTO incident_events (incident_id, type, at, by_user_id, created_at) VALUES (?, 'SIM_RESUME', NOW(), NULL, NOW())`, [incidentId]);
-    return { ok: true, status: 'SIMULATION' };
+    await pool.execute(
+      `INSERT INTO incident_events (incident_id, type, at, by_user_id, notes, created_at)
+       VALUES (?, 'STATUS', NOW(), NULL, 'SIM_RESUME', NOW())`,
+      [incidentId]
+    );
+    return { ok: true, status: 'RUNNING' };
   }
   if (status === 'CLOSED') {
     if (inc.status === 'CLOSED') return { ok: true, status: 'CLOSED' };
     await pool.execute(`UPDATE incidents SET status='CLOSED', ended_at=NOW(), updated_at=NOW() WHERE id=?`, [incidentId]);
-    await pool.execute(`INSERT INTO incident_events (incident_id, type, at, by_user_id, created_at) VALUES (?, 'SIM_END', NOW(), NULL, NOW())`, [incidentId]);
+    await pool.execute(`INSERT INTO incident_events (incident_id, type, at, by_user_id, notes, created_at) VALUES (?, 'STATUS', NOW(), NULL, 'SIM_END', NOW())`, [incidentId]);
     return { ok: true, status: 'CLOSED' };
   }
   return { ok: false, code: 400, msg: 'Estado inválido' };

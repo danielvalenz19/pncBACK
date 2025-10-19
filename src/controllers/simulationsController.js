@@ -33,11 +33,11 @@ async function updateDemoStatus(req, res, next) {
     if (error) return res.status(400).json({ error: 'ValidationError', message: error.message });
     const result = await updateSimulationStatus({ incidentId: req.params.id, status: value.status });
     if (!result.ok) return res.status(result.code || 400).json({ error: 'SimulationError', message: result.msg });
-    // Emit patch segun estado
-    if (result.status === 'SIM_PAUSED') {
-      rt.incidentUpdate(req.params.id, { status: 'SIM_PAUSED' });
-    } else if (result.status === 'SIMULATION') {
-      rt.incidentUpdate(req.params.id, { status: 'SIMULATION' });
+    // Emitir solo estados válidos; PAUSED/RUNNING van como meta de simulación
+    if (result.status === 'PAUSED') {
+      rt.incidentUpdate(req.params.id, { meta: { sim_status: 'PAUSED' } });
+    } else if (result.status === 'RUNNING') {
+      rt.incidentUpdate(req.params.id, { meta: { sim_status: 'RUNNING' } });
     } else if (result.status === 'CLOSED') {
       rt.incidentUpdate(req.params.id, { status: 'CLOSED' });
     }
