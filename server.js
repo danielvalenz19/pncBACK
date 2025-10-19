@@ -325,10 +325,14 @@ app.get('/api/v1/me', authenticate, (req, res) => {
 });
 app.use('/api/v1/users', authenticate, usersRouter);
 // Rutas de administración (protegidasy requieren rol admin internamente)
+// Portal de ciudadanos montado directo (roles: admin, supervisor, operator, unit)
+const adminCitizensRouter = require('./src/routes/admin.citizens.routes');
+app.use('/api/v1/admin/citizens', adminCitizensRouter);
+
 app.use('/api/v1/admin', authenticate, requireRole('admin'), adminRouter);
 // App móvil (ciudadano) roles permitidos: unit, admin (admin para pruebas)
-app.use('/api/v1/incidents', authenticate, requireRole('unit','admin'), incidentsRouter);
-app.use('/api/v1/devices', authenticate, requireRole('unit','admin'), devicesRouter);
+app.use('/api/v1/incidents', authenticate, requireRole('citizen','unit','admin'), incidentsRouter);
+app.use('/api/v1/devices', authenticate, requireRole('citizen','unit','admin'), devicesRouter);
 // Portal operación/despacho
 app.use('/api/v1/ops', authenticate, requireRole('operator','supervisor','admin'), opsRouter);
 // Simulaciones (crear incidentes demo y cambiar estado) roles: operator, supervisor, admin

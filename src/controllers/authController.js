@@ -60,7 +60,7 @@ async function register(req, res, next) {
       email: value.email,
       phone: value.phone || null,
       password_hash,
-      role: 'unit',
+      role: 'citizen',
       status: 'active'
     });
 
@@ -72,10 +72,10 @@ async function register(req, res, next) {
 
   await conn.commit();
 
-  const payload = { user_id: userId, role: 'unit', email: value.email, must_change: false };
+  const payload = { user_id: userId, role: 'citizen', email: value.email, must_change: false };
     const accessToken = signAccessToken(payload);
     const jti = newJti();
-    const refreshToken = signRefreshToken({ user_id: userId, role: 'unit' }, jti);
+    const refreshToken = signRefreshToken({ user_id: userId, role: 'citizen' }, jti);
     await saveRefresh({ jti, userId, ttlDays: REFRESH_DAYS, ip: req.ip, ua: req.headers['user-agent'] });
 
     res.status(201).json({ user_id: userId, accessToken, refreshToken });

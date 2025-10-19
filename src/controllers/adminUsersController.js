@@ -154,6 +154,23 @@ async function update(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// PATCH /api/v1/admin/users/:id/role
+async function updateRole(req, res, next) {
+  try {
+    const id = Number(req.params.id);
+    const { role } = req.body || {};
+    if (!['admin','supervisor','operator','unit','citizen'].includes(role)) {
+      return res.status(400).json({ error:'BadRequest', message:'rol inválido' });
+    }
+    const existing = await findById(id);
+    if (!existing) return res.status(404).json({ error:'NotFound', message:'Usuario no existe' });
+    await updateByIdPartial(id, { role });
+    // opcional: revocar refresh tokens para forzar re-login con el nuevo rol
+    // await revokeAllForUser(id);
+    res.status(204).end();
+  } catch (e) { next(e); }
+}
+
 // exports consolidated at end
 // GET /api/v1/admin/users  (lista paginada + filtros)
 async function list(req, res, next) {
@@ -194,6 +211,6 @@ async function stats(req, res, next) {
 }
 
 module.exports = {
-  createStaff, resetPassword, updateStatus, getById, update,
+  createStaff, resetPassword, updateStatus, getById, update, updateRole,
   list, stats
 };

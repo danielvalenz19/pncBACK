@@ -99,6 +99,8 @@ adminRouter.post('/users/:id/reset-password', requireRole('admin'), ctrl.resetPa
  *       204: { description: No Content }
  */
 adminRouter.patch('/users/:id/status', requireRole('admin'), ctrl.updateStatus);
+// Cambiar rol (admin)
+adminRouter.patch('/users/:id/role', requireRole('admin'), ctrl.updateRole);
 
 /**
  * @swagger
