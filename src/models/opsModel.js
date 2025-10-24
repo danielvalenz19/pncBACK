@@ -42,10 +42,96 @@ async function getIncidentDetails(id) {
 }
 
 async function currentStatus(id) { const [[row]] = await pool.query(`SELECT status FROM incidents WHERE id=? LIMIT 1`, [id]); return row?.status || null; }
+
+const assignments = require('./assignmentsModel');
+
 async function ackIncident({ id, by }) { const st=await currentStatus(id); if(!st) return { ok:false, code:404, msg:'Incidente no existe' }; if(st!=='NEW') return { ok:false, code:409, msg:'Ya no está en NEW' }; await pool.execute(`UPDATE incidents SET status='ACK', updated_at=NOW() WHERE id=?`,[id]); await pool.execute(`INSERT INTO incident_events (incident_id, type, at, by_user_id, created_at) VALUES (?, 'ACK', NOW(), ?, NOW())`,[id,by]); return { ok:true }; }
-async function assignUnit({ id, unitId, note, by }) { const st=await currentStatus(id); if(!st) return { ok:false, code:404, msg:'Incidente no existe' }; const [[u]] = await pool.query(`SELECT id, active FROM units WHERE id=? LIMIT 1`,[unitId]); if(!u) return { ok:false, code:404, msg:'Unidad no existe' }; if(!u.active) return { ok:false, code:409, msg:'Unidad inactiva' }; await pool.execute(`INSERT INTO incident_assignments (incident_id, unit_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE assigned_at=assigned_at`,[id,unitId]); await pool.execute(`INSERT INTO incident_events (incident_id, type, at, by_user_id, notes, payload_json, created_at) VALUES (?, 'ASSIGN', NOW(), ?, ?, JSON_OBJECT('unit_id', ?), NOW())`,[id,by,note||null,unitId]); if(st==='NEW'||st==='ACK'){ await pool.execute(`UPDATE incidents SET status='DISPATCHED', updated_at=NOW() WHERE id=?`,[id]); } return { ok:true }; }
+const { rt } = require('../realtime/io');
+
+async function assignUnit({ id, unitId, note, by }) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const st = await currentStatus(id);
+    if (!st) { await conn.rollback(); conn.release(); return { ok: false, code: 404, msg: 'Incidente no existe' }; }
+    const [[u]] = await conn.query(`SELECT id, active FROM units WHERE id=? LIMIT 1`, [unitId]);
+    if (!u) { await conn.rollback(); conn.release(); return { ok: false, code: 404, msg: 'Unidad no existe' }; }
+    if (!u.active) { await conn.rollback(); conn.release(); return { ok: false, code: 409, msg: 'Unidad inactiva' }; }
+
+    // 1) Crear (o ignorar si ya existe) asignación
+    await conn.execute(`INSERT IGNORE INTO incident_assignments (incident_id, unit_id) VALUES (?, ?)`, [id, unitId]);
+
+    // 2) Registrar evento ASSIGN
+    await conn.execute(`INSERT INTO incident_events (incident_id, type, at, by_user_id, notes, payload_json, created_at) VALUES (?, 'ASSIGN', NOW(), ?, ?, JSON_OBJECT('unit_id', ?), NOW())`, [id, by, note || null, unitId]);
+
+    // 3) Marcar incidente como despachado si aplica
+    if (st === 'NEW' || st === 'ACK') {
+      await conn.execute(`UPDATE incidents SET status='DISPATCHED', updated_at=NOW() WHERE id=?`, [id]);
+    }
+
+    // 4) La unidad pasa a "en_route"
+    await conn.execute(`UPDATE units SET status = 'en_route' WHERE id = ?`, [unitId]);
+
+    await conn.commit();
+
+    // Notificar cambio de unidad (usamos el realtime exporter)
+    try { rt.unitUpdate({ id: unitId, patch: { status: 'en_route' } }); } catch (_) {}
+
+    return { ok: true };
+  } catch (e) {
+    try { await conn.rollback(); } catch (_e) {}
+    throw e;
+  } finally {
+    conn.release();
+  }
+}
 const allowedNext=new Set(['DISPATCHED','IN_PROGRESS','CLOSED']);
-async function updateIncidentStatus({ id, status, reason, by }) { if(!allowedNext.has(status)) return { ok:false, code:400, msg:'Estado inválido' }; const st=await currentStatus(id); if(!st) return { ok:false, code:404, msg:'Incidente no existe' }; const allowedFrom={ DISPATCHED:new Set(['NEW','ACK','DISPATCHED']), IN_PROGRESS:new Set(['DISPATCHED','IN_PROGRESS']), CLOSED:new Set(['IN_PROGRESS','DISPATCHED','ACK','NEW']) }; if(!allowedFrom[status].has(st)) return { ok:false, code:409, msg:`Transición ${st}→${status} no permitida` }; await pool.execute(`UPDATE incidents SET status=?, updated_at=NOW(), ended_at=IF(?='CLOSED', NOW(), ended_at) WHERE id=?`,[status,status,id]); await pool.execute(`INSERT INTO incident_events (incident_id, type, at, by_user_id, notes, created_at) VALUES (?, 'STATUS', NOW(), ?, ?, NOW())`,[id,by,reason||null]); if(status==='CLOSED'){ await pool.execute(`INSERT INTO incident_events (incident_id, type, at, by_user_id, notes, created_at) VALUES (?, 'CLOSE', NOW(), ?, ?, NOW())`,[id,by,reason||null]); } return { ok:true }; }
+async function updateIncidentStatus({ id, status, reason, by }) {
+  if (!allowedNext.has(status)) return { ok: false, code: 400, msg: 'Estado inválido' };
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const st = await currentStatus(id);
+    if (!st) { await conn.rollback(); conn.release(); return { ok: false, code: 404, msg: 'Incidente no existe' }; }
+    const allowedFrom = { DISPATCHED: new Set(['NEW','ACK','DISPATCHED']), IN_PROGRESS: new Set(['DISPATCHED','IN_PROGRESS']), CLOSED: new Set(['IN_PROGRESS','DISPATCHED','ACK','NEW']) };
+    if (!allowedFrom[status].has(st)) { await conn.rollback(); conn.release(); return { ok: false, code: 409, msg: `Transición ${st}→${status} no permitida` }; }
+
+    await conn.execute(`UPDATE incidents SET status=?, updated_at=NOW(), ended_at=IF(?='CLOSED', NOW(), ended_at) WHERE id=?`, [status, status, id]);
+    await conn.execute(`INSERT INTO incident_events (incident_id, type, at, by_user_id, notes, created_at) VALUES (?, 'STATUS', NOW(), ?, ?, NOW())`, [id, by, reason || null]);
+    if (status === 'CLOSED') {
+      await conn.execute(`INSERT INTO incident_events (incident_id, type, at, by_user_id, notes, created_at) VALUES (?, 'CLOSE', NOW(), ?, ?, NOW())`, [id, by, reason || null]);
+
+  // Obtener unidades activas en este incidente
+  const unitIds = await assignments.getActiveUnitIdsByIncident(conn, id);
+
+  // Cerrar asignaciones activas
+  await assignments.closeAssignmentsForIncident(conn, id);
+
+      // Volver unidades a available
+      if (unitIds.length) {
+        await conn.query(`UPDATE units SET status = 'available' WHERE id IN (${unitIds.map(()=>'?').join(',')})`, unitIds);
+      }
+
+      await conn.commit();
+
+      // Emitir actualizaciones por realtime
+      try {
+        rt.incidentUpdate(id, { status: 'CLOSED' });
+        unitIds.forEach(uid => rt.unitUpdate({ id: uid, patch: { status: 'available' } }));
+      } catch (_) {}
+
+      return { ok: true };
+    }
+
+    await conn.commit();
+    return { ok: true };
+  } catch (e) {
+    try { await conn.rollback(); } catch (_e) {}
+    throw e;
+  } finally {
+    conn.release();
+  }
+}
 async function addNote({ id, text, by }) { const st=await currentStatus(id); if(!st) return { ok:false, code:404, msg:'Incidente no existe' }; const [r] = await pool.execute(`INSERT INTO incident_events (incident_id, type, at, by_user_id, notes, created_at) VALUES (?, 'NOTE', NOW(), ?, ?, NOW())`,[id,by,text]); return { ok:true, data:{ id:r.insertId, at:new Date(), by } }; }
 async function listUnits({ status, type }={}) { const where=['1=1']; const p=[]; if(status){ where.push('u.status=?'); p.push(status); } if(type){ where.push('u.type=?'); p.push(type); } const [rows] = await pool.query(`SELECT id, name, type, plate, status, active, lat, lng, last_seen FROM units u WHERE ${where.join(' AND ')} ORDER BY name ASC`,p); return rows; }
 async function createUnit({ name, type, plate, active }) { const [r] = await pool.execute(`INSERT INTO units (name, type, plate, active, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'available', NOW(), NOW())`,[name,type,plate||null,active?1:0]); return r.insertId; }

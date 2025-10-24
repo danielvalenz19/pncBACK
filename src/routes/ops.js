@@ -181,6 +181,22 @@ opsRouter.get('/units', units.list);
 opsRouter.post('/units', units.create);
 /**
  * @swagger
+ * /api/v1/ops/units/{id}/active-assignment:
+ *   get:
+ *     summary: Obtener assignment activo de una unidad
+ *     tags: [Ops]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: OK }
+ */
+opsRouter.get('/units/:id/active-assignment', units.activeAssignment);
+/**
+ * @swagger
  * /api/v1/ops/units/{id}:
  *   patch:
  *     summary: Actualizar unidad
