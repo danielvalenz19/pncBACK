@@ -5,7 +5,8 @@ const ctrl = require('../controllers/adminCitizensController');
 const router = Router();
 
 // Staff only: admin, supervisor, operator, unit
-router.use(authenticate, requireRole('admin','supervisor','operator','unit'));
+// IMPORTANT: scope middleware to /citizens paths only to avoid intercepting other /api/v1/* routes
+router.use('/citizens', authenticate, requireRole('admin','supervisor','operator','unit'));
 
 // Alias endpoints under /api/v1/citizens*
 router.get('/citizens/stats', ctrl.stats);

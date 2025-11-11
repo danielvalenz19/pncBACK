@@ -336,7 +336,7 @@ const adminCitizensRouter = require('./src/routes/admin.citizens.routes');
 app.use('/api/v1/admin/citizens', adminCitizensRouter);
 
 app.use('/api/v1/admin', authenticate, requireRole('admin'), adminRouter);
-// App móvil (ciudadano) roles permitidos: unit, admin (admin para pruebas)
+// App móvil (ciudadano) roles permitidos: citizen, unit, admin (admin para pruebas)
 app.use('/api/v1/incidents', authenticate, requireRole('citizen','unit','admin'), incidentsRouter);
 app.use('/api/v1/devices', authenticate, requireRole('citizen','unit','admin'), devicesRouter);
 // Portal operación/despacho

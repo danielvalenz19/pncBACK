@@ -7,7 +7,7 @@ const devicesRouter = express.Router();
  * @swagger
  * tags:
  *   name: Devices
- *   description: "Registro de tokens FCM (roles: unit, admin)"
+ *   description: "Registro de tokens FCM (roles: citizen, unit, admin)"
  */
 
 /**

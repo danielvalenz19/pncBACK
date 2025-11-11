@@ -7,7 +7,7 @@ const incidentsRouter = express.Router();
  * @swagger
  * tags:
  *   name: Incidents
- *   description: "App móvil (ciudadano) (roles: unit, admin)"
+ *   description: "App móvil (ciudadano) (roles: citizen, unit, admin)"
  */
 
 /**
