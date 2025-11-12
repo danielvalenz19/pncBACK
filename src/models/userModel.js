@@ -68,14 +68,35 @@ async function findById(id) {
   return rows[0];
 }
 
-// NUEVO: perfil simplificado para /me
+// Perfil canónico para /me y /users/:id (lecturas unificadas)
+// Canon: users.full_name; Compat (alias): name = full_name
 async function getProfileById(id) {
   const [rows] = await pool.execute(
-    `SELECT id AS user_id, email, full_name, phone, role, status, created_at
-       FROM users WHERE id=? LIMIT 1`,
+    `SELECT u.id AS user_id, u.email, u.full_name, u.phone, u.role, u.status, u.created_at,
+            c.address, c.preferred_lang,
+            (c.emergency_pin_hash IS NOT NULL) AS emergency_pin_set
+       FROM users u
+       LEFT JOIN citizens c ON c.user_id = u.id
+      WHERE u.id=?
+      LIMIT 1`,
     [id]
   );
-  return rows[0];
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    user_id: r.user_id,
+    id: r.user_id, // optional convenience
+    full_name: r.full_name,
+    name: r.full_name, // alias for legacy clients
+    email: r.email,
+    phone: r.phone,
+    address: r.address || null,
+    preferred_lang: r.preferred_lang || null,
+    emergency_pin_set: !!r.emergency_pin_set,
+    role: r.role,
+    status: r.status,
+    created_at: r.created_at
+  };
 }
 
 async function getAuthById(id) {

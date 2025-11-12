@@ -18,7 +18,7 @@ async function listIncidents({ status, from, to, geo, q, page=1, limit=50 }) {
 }
 
 async function getIncidentDetails(id) {
-  const [[inc]] = await pool.query(`SELECT i.id, i.citizen_id, i.status, i.started_at, i.ended_at, i.lat, i.lng, i.accuracy, i.priority, i.init_battery, c.name AS citizen_name, c.address AS citizen_address, u.email AS citizen_email, u.phone AS citizen_phone FROM incidents i LEFT JOIN citizens c ON c.user_id=i.citizen_id LEFT JOIN users u ON u.id=i.citizen_id WHERE i.id=? LIMIT 1`, [id]);
+  const [[inc]] = await pool.query(`SELECT i.id, i.citizen_id, i.status, i.started_at, i.ended_at, i.lat, i.lng, i.accuracy, i.priority, i.init_battery, COALESCE(u.full_name, c.name) AS citizen_name, c.address AS citizen_address, u.email AS citizen_email, u.phone AS citizen_phone FROM incidents i LEFT JOIN citizens c ON c.user_id=i.citizen_id LEFT JOIN users u ON u.id=i.citizen_id WHERE i.id=? LIMIT 1`, [id]);
   if (!inc) return null;
   const [locations] = await pool.query(`SELECT at, CAST(JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.lat')) AS DECIMAL(10,6)) AS lat, CAST(JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.lng')) AS DECIMAL(10,6)) AS lng, CAST(JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.accuracy')) AS UNSIGNED) AS accuracy FROM incident_events WHERE incident_id=? AND type='LOCATION' ORDER BY at ASC, id ASC LIMIT 2000`, [id]);
   const [assignments] = await pool.query(`SELECT ia.id, ia.assigned_at, ia.accepted_at, ia.arrived_at, ia.cleared_at, u2.id AS unit_id, u2.name AS unit_name, u2.type AS unit_type, u2.plate FROM incident_assignments ia JOIN units u2 ON u2.id=ia.unit_id WHERE ia.incident_id=? ORDER BY ia.assigned_at ASC, ia.id ASC`, [id]);

@@ -11,13 +11,18 @@ const { pool } = require('../config/db');
 const { validateStrength } = require('../utils/passwordPolicy');
 
 // -------------------- REGISTER (app ciudadanos) --------------------
+// Accept both legacy "name" and new canonical "full_name"; require at least one
 const registerSchema = Joi.object({
-  name:     Joi.string().min(2).max(120).required(),
-  email:    Joi.string().email().required(),
+  name: Joi.string().min(2).max(120),
+  full_name: Joi.string().min(2).max(120),
+  email: Joi.string().email().required(),
   password: Joi.string().min(8).required(),
-  phone:    Joi.string().allow(null, ''),
-  pin:      Joi.string().pattern(/^[0-9]{4,6}$/).optional()
-});
+  phone: Joi.string().allow(null, ''),
+  pin: Joi.string().pattern(/^[0-9]{4,6}$/).optional()
+}).custom((v, helpers) => {
+  if (!v.name && !v.full_name) return helpers.error('any.custom', { message: 'Debe enviar full_name' });
+  return v;
+}, 'name/full_name requirement');
 
 /**
  * @swagger
@@ -32,13 +37,16 @@ const registerSchema = Joi.object({
  *           schema:
  *             type: object
  *             properties:
- *               name: { type: string }
+ *               full_name: { type: string }
+ *               name: { type: string, description: 'legacy alias of full_name' }
  *               email: { type: string }
  *               password: { type: string }
  *               phone: { type: string }
  *     responses:
  *       201: { description: Created }
  */
+const { normalizeGT } = require('../utils/phone');
+
 async function register(req, res, next) {
   const conn = await pool.getConnection();
   try {
@@ -49,16 +57,20 @@ async function register(req, res, next) {
       return res.status(409).json({ error: 'Conflict', message: 'Email ya registrado' });
     }
 
-    const password_hash = await bcrypt.hash(value.password, 12);
+  const fullName = value.full_name || value.name; // canonical
+  const password_hash = await bcrypt.hash(value.password, 12);
 
-    let pinPlain = value.pin || (value.phone ? (value.phone.replace(/\D/g,'').slice(-4) || '0000') : '0000');
+  const normalizedPhone = normalizeGT(value.phone);
+
+  let pinPlain = value.pin || (value.phone ? (String(value.phone).replace(/\D/g,'').slice(-4) || '0000') : '0000');
     const emergency_pin_hash = await bcrypt.hash(pinPlain, 12);
 
   await conn.beginTransaction();
 
   const userId = await createUser(conn, {
       email: value.email,
-      phone: value.phone || null,
+      full_name: fullName,
+      phone: normalizedPhone,
       password_hash,
       role: 'citizen',
       status: 'active'
@@ -66,7 +78,7 @@ async function register(req, res, next) {
 
   await createCitizen(conn, {
       user_id: userId,
-      name: value.name,
+      name: fullName, // keep mirror for now; trigger can sync later
       emergency_pin_hash
     });
 
@@ -296,4 +308,59 @@ async function me(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { register, login, refresh, logout, changePassword, recoveryVerify, recoveryReset, me };
+// ---- Actualizar perfil autenticado ----
+const updateMeSchema = Joi.object({
+  full_name: Joi.string().min(2).max(120).optional(),
+  name: Joi.string().min(2).max(120).optional(), // legacy alias, mapped to full_name
+  phone: Joi.string().allow(null, '').optional(),
+  address: Joi.string().allow(null, '').optional(),
+  preferred_lang: Joi.string().valid('es','en').allow(null).optional()
+}).min(1);
+
+async function updateMe(req, res, next) {
+  const conn = await pool.getConnection();
+  try {
+    const { value, error } = updateMeSchema.validate(req.body || {});
+    if (error) return res.status(400).json({ error: 'BadRequest', message: error.message });
+    const uid = req.user?.user_id;
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const fullName = value.full_name || value.name;
+    const phone = value.phone !== undefined ? normalizeGT(value.phone) : undefined;
+
+    await conn.beginTransaction();
+
+    const userSets = [];
+    const userParams = [];
+    if (fullName !== undefined) { userSets.push('full_name=?'); userParams.push(fullName || null); }
+    if (phone !== undefined) { userSets.push('phone=?'); userParams.push(phone); }
+    if (userSets.length) {
+      userParams.push(uid);
+      await conn.query(`UPDATE users SET ${userSets.join(', ')}, updated_at=NOW() WHERE id=?`, userParams);
+      // If you don't have DB trigger to mirror name to citizens, uncomment to mirror:
+      // if (fullName !== undefined) await conn.query('UPDATE citizens SET name=? WHERE user_id=?', [fullName || null, uid]);
+    }
+
+    if (value.address !== undefined || value.preferred_lang !== undefined) {
+      await conn.query(
+        `UPDATE citizens SET
+           address = COALESCE(?, address),
+           preferred_lang = COALESCE(?, preferred_lang),
+           updated_at = NOW()
+         WHERE user_id=?`,
+        [value.address ?? null, value.preferred_lang ?? null, uid]
+      );
+    }
+
+    await conn.commit();
+    const profile = await getProfileById(uid);
+    return res.json(profile);
+  } catch (err) {
+    try { await conn.rollback(); } catch(_) {}
+    next(err);
+  } finally {
+    conn.release();
+  }
+}
+
+module.exports = { register, login, refresh, logout, changePassword, recoveryVerify, recoveryReset, me, updateMe };

@@ -20,6 +20,7 @@ const { initRealtime } = require('./src/realtime/io');
 const { realtimeRouter } = require('./src/routes/realtime');
 const citizensAliasRouter = require('./src/routes/citizens');
 const { citizensRouter } = require('./src/routes/citizensRouter');
+const { getProfileById } = require('./src/models/userModel');
 
 const app = express();
 
@@ -308,6 +309,8 @@ const swaggerOptions = {
 };
 const swaggerSpec = swaggerJsdoc(swaggerOptions);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+// Optional: raw spec for debugging
+app.get('/api-docs.json', (_req, res) => res.json(swaggerSpec));
 
 /* Salud/diagnóstico */
 app.get('/health', (_req, res) => res.json({ ok: true, env: process.env.NODE_ENV || 'development' }));
@@ -320,14 +323,12 @@ app.use('/api/v1', citizensAliasRouter);
 app.use('/api/v1/citizens', authenticate, requireRole('admin','supervisor','operator','unit'), citizensRouter);
 
 /* Rutas protegidas */
-app.get('/api/v1/me', authenticate, (req, res) => {
-  // Token ya incluye must_change si aplica
-  res.json({
-    user_id: req.user.user_id,
-    role: req.user.role,
-    email: req.user.email || null,
-    must_change: !!req.user.must_change
-  });
+app.get('/api/v1/me', authenticate, async (req, res, next) => {
+  try {
+    const profile = await getProfileById(req.user.user_id);
+    if (!profile) return res.status(404).json({ error: 'NotFound' });
+    return res.json(profile);
+  } catch (e) { next(e); }
 });
 app.use('/api/v1/users', authenticate, usersRouter);
 // Rutas de administración (protegidasy requieren rol admin internamente)
