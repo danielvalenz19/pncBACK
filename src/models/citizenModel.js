@@ -33,4 +33,16 @@ async function getCitizenById(userId) {
   return rows[0] || null;
 }
 
-module.exports = { createCitizen, getKbaDataByEmail, getCitizenById };
+async function updateCitizenNameByUserId(userId, name) {
+  await pool.execute(
+    'UPDATE citizens SET name=?, updated_at=NOW() WHERE user_id=?',
+    [name || null, userId]
+  );
+}
+
+module.exports = {
+  createCitizen,
+  getKbaDataByEmail,
+  getCitizenById,
+  updateCitizenNameByUserId
+};
